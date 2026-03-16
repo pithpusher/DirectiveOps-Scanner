@@ -1,0 +1,17 @@
+{
+  "name": "@directiveops/policy-engine",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@directiveops/constitution-model": "0.1.0",
+    "@directiveops/oss-types": "0.1.0"
+  }
+}
+

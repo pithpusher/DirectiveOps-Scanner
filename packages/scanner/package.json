@@ -1,0 +1,19 @@
+{
+  "name": "@directiveops/scanner",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "dist/packages/scanner/src/index.js",
+  "types": "dist/packages/scanner/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@directiveops/constitution-model": "0.1.0",
+    "@directiveops/parser": "0.1.0",
+    "@directiveops/policy-engine": "0.1.0",
+    "@directiveops/oss-types": "0.1.0"
+  }
+}
+

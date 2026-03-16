@@ -1,0 +1,21 @@
+{
+  "name": "directiveops-scanner-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "scan": "tsx apps/cli/src/index.ts scan --path .",
+    "typecheck": "npm run typecheck --workspace @directiveops/scanner && npm run typecheck --workspace @directiveops/parser && npm run typecheck --workspace @directiveops/constitution-model && npm run typecheck --workspace @directiveops/policy-engine && npm run typecheck --workspace @directiveops/oss-types",
+    "build": "npm run build --workspace @directiveops/scanner && npm run build --workspace @directiveops/parser && npm run build --workspace @directiveops/constitution-model && npm run build --workspace @directiveops/policy-engine && npm run build --workspace @directiveops/oss-types"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.2"
+  }
+}
+

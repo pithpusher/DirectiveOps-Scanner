@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@directiveops/constitution-model": ["packages/constitution-model/src"],
+      "@directiveops/parser": ["packages/parser/src"],
+      "@directiveops/policy-engine": ["packages/policy-engine/src"],
+      "@directiveops/oss-types": ["packages/oss-types/src"],
+      "@directiveops/scanner": ["packages/scanner/src"]
+    }
+  }
+}
+

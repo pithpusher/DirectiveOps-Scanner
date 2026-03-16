@@ -1,0 +1,21 @@
+{
+  "$schema": "https://example.com/directiveops-config.schema.json",
+  "additionalInstructionPaths": [
+    "docs/AGENTS.md"
+  ],
+  "requiredCategories": [
+    "testing",
+    "security"
+  ],
+  "allowRemoteHosts": [
+    "github.com"
+  ],
+  "baselineDirectives": [
+    {
+      "key": "testing:all-prs-must-run-tests",
+      "category": "testing",
+      "normalizedText": "all pull requests must run tests in ci"
+    }
+  ]
+}
+
