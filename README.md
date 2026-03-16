@@ -1,10 +1,33 @@
-## DirectiveOps Scanner
+# DirectiveOps Scanner
 
-DirectiveOps Scanner is an open-source CLI for discovering, normalizing, and reporting on AI coding instruction files across repositories.
+DirectiveOps Scanner is an open-source CLI for scanning `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, GitHub Copilot instructions, and related AI coding agent instruction files in a repository.
 
-It is the OSS scanner slice of the broader DirectiveOps product and is focused strictly on local analysis. The hosted DirectiveOps control-plane adds central visibility, org templates, coordinated rollouts, and history, but is not part of this repository.
+It helps engineering teams discover instruction files, normalize directives, detect drift or conflicts, and export JSON or Markdown reports. The free scanner is built for local repository analysis. Teams that need multi-repo visibility, rollout workflows, dashboards, policy management, and audit history should use the hosted product at [DirectiveOps](https://www.directiveops.dev/).
 
-### What it scans
+## What it does
+
+- Scans common AI instruction files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, and `.github/instructions/*.instructions.md`
+- Normalizes extracted instructions into a constitution-style model
+- Detects basic drift, conflict, risky import, stale reference, and required-directive findings
+- Exports machine-readable JSON and human-readable Markdown reports
+- Supports local baselines through `directiveops.config.json`
+
+## Who it is for
+
+- Platform and developer experience teams auditing AI coding assistant instructions
+- Security and governance teams reviewing prompt and policy drift
+- Repository owners who want a free local scanner before adopting central controls
+- Teams comparing `AGENTS.md`, Copilot instructions, and other agent-specific instruction files
+
+## Why teams use it
+
+- Find all AI coding instruction files in a repo quickly
+- Detect conflicting or risky instructions before they spread
+- Standardize how agent instructions are analyzed across repositories
+- Generate reports that can be shared in issues, PRs, or internal reviews
+- Start with the free scanner, then move to [DirectiveOps](https://www.directiveops.dev/) for centralized governance and paid workflows
+
+## What it scans
 
 By default, the scanner discovers:
 
@@ -15,18 +38,14 @@ By default, the scanner discovers:
 - `.github/instructions/*.instructions.md`
 - Any additional paths configured in `directiveops.config.json`
 
-### What it produces
+## What it produces
 
-- **JSON output**: a `ScannerResult` containing:
-  - `discoveredFiles`
-  - `constitution` graph
-  - `findings` (basic drift/conflict/risk findings)
-  - summary counts and a simple drift score
-- **Markdown report**: human-readable summary suitable for sharing or attaching to issues (with optional sanitization).
+- JSON output: a `ScannerResult` containing discovered files, a normalized constitution graph, findings, summary counts, and a drift score
+- Markdown report: a human-readable summary suitable for sharing or attaching to issues, with optional sanitization
 
-### Installation
+## Installation
 
-From npm (once published):
+From npm:
 
 ```bash
 npm install -g @directiveops/scanner-cli
@@ -40,7 +59,7 @@ npm run build
 npx directiveops-scanner scan --path .
 ```
 
-### Quickstart
+## Quickstart
 
 Scan the current repository:
 
@@ -63,7 +82,25 @@ Run a sanitized report suitable for sharing:
 directiveops-scanner scan --path . --markdown report.md --sanitize
 ```
 
-### Config example (`directiveops.config.json`)
+## Common use cases
+
+### Audit AI instruction files in a repository
+
+Use DirectiveOps Scanner to inventory agent instruction files and see what guidance different tools are receiving.
+
+### Detect prompt or policy drift
+
+Run the scanner against a repo baseline to flag required directives, conflicts, and risky imports.
+
+### Generate compliance-style reports
+
+Export JSON for tooling or Markdown for human review in pull requests and issues.
+
+### Evaluate the free scanner before moving to hosted governance
+
+Use the local CLI for repository-level analysis, then adopt [DirectiveOps](https://www.directiveops.dev/) when you need org-wide visibility, controls, and rollout workflows.
+
+## Config example (`directiveops.config.json`)
 
 Place a `directiveops.config.json` at the repo root to control local baseline behavior:
 
@@ -89,7 +126,7 @@ Place a `directiveops.config.json` at the repo root to control local baseline be
 }
 ```
 
-### Sample JSON output
+## Sample JSON output
 
 ```json
 {
@@ -117,7 +154,7 @@ Place a `directiveops.config.json` at the repo root to control local baseline be
 }
 ```
 
-### Sample Markdown report (excerpt)
+## Sample Markdown report
 
 ```markdown
 # DirectiveOps OSS Scanner Report
@@ -139,18 +176,32 @@ Place a `directiveops.config.json` at the repo root to control local baseline be
 - [HIGH] Remote instruction import is outside the approved source set (AGENTS.md)
 ```
 
-### OSS vs hosted boundary
+## OSS scanner vs hosted DirectiveOps
 
-- **This repository (OSS Scanner)**:
-  - Local CLI only
-  - Discovers instruction files in a single repository
-  - Parses them into a normalized constitution model
-  - Runs a basic findings engine (conflicts, risky imports, stale references, required directives, local drift)
-  - Emits JSON and Markdown reports
-- **Hosted DirectiveOps** (separate product):
-  - Central multi-repo inventory and dashboards
-  - Org-level templates and policy rules
-  - Rollout preview and PR generation
-  - History, audit, and collaboration features
+### This repository: free OSS scanner
 
+- Local CLI for scanning one repository at a time
+- Discovers and parses AI instruction files
+- Builds a normalized constitution model
+- Runs a basic findings engine for drift, conflicts, risky imports, stale references, and missing required directives
+- Emits JSON and Markdown reports
 
+### DirectiveOps: hosted paid product
+
+- Central multi-repo inventory and dashboards
+- Org-level templates and policy rules
+- Rollout preview and PR generation
+- Drift tracking and audit history
+- Team collaboration, RBAC, and exception workflows
+
+If you are evaluating the free scanner and need governance across repositories, use [DirectiveOps](https://www.directiveops.dev/) as the next step.
+
+## Related files
+
+- [Example config](./examples/directiveops.config.json)
+- [Example report](./examples/report.md)
+- [Example repo with `AGENTS.md`](./examples/simple-repo/AGENTS.md)
+
+## Keywords
+
+AI instruction file scanner, `AGENTS.md` scanner, `CLAUDE.md` scanner, `GEMINI.md` scanner, GitHub Copilot instruction scanner, prompt governance, instruction drift detection, policy drift scanner, repository compliance scanner, developer tooling CLI.

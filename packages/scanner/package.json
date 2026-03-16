@@ -2,6 +2,30 @@
   "name": "@directiveops/scanner",
   "version": "0.1.0",
   "private": false,
+  "description": "Library for scanning AI coding instruction files such as AGENTS.md, CLAUDE.md, GEMINI.md, and Copilot instructions across repositories.",
+  "keywords": [
+    "ai",
+    "agents",
+    "agents-md",
+    "claude-md",
+    "gemini-md",
+    "copilot-instructions",
+    "prompt-governance",
+    "policy-engine",
+    "repository-scanner",
+    "scanner",
+    "typescript",
+    "directiveops"
+  ],
+  "homepage": "https://www.directiveops.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pithpusher/DirectiveOps-Scanner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pithpusher/DirectiveOps-Scanner/issues"
+  },
+  "license": "MIT",
   "type": "module",
   "main": "dist/packages/scanner/src/index.js",
   "types": "dist/packages/scanner/src/index.d.ts",
@@ -16,4 +40,3 @@
     "@directiveops/oss-types": "0.1.0"
   }
 }
-

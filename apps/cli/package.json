@@ -2,6 +2,30 @@
   "name": "@directiveops/scanner-cli",
   "version": "0.1.0",
   "private": false,
+  "description": "CLI for scanning AGENTS.md, CLAUDE.md, GEMINI.md, and Copilot instruction files to detect AI instruction drift, conflicts, and risks.",
+  "keywords": [
+    "ai",
+    "agents",
+    "agents-md",
+    "claude-md",
+    "gemini-md",
+    "copilot-instructions",
+    "prompt-governance",
+    "policy-drift",
+    "repository-scanner",
+    "compliance",
+    "cli",
+    "directiveops"
+  ],
+  "homepage": "https://www.directiveops.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pithpusher/DirectiveOps-Scanner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pithpusher/DirectiveOps-Scanner/issues"
+  },
+  "license": "MIT",
   "type": "module",
   "bin": {
     "directiveops-scanner": "dist/index.js"
@@ -16,4 +40,3 @@
     "@directiveops/scanner": "0.1.0"
   }
 }
-
