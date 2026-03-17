@@ -30,7 +30,8 @@ export const DEFAULT_RULE_EVALUATORS: RuleEvaluator[] = [
   evaluateOrgDrift,
   evaluateUndocumentedOverrides,
   evaluateScopeContradictions,
-  evaluateCircularReferences
+  evaluateCircularReferences,
+  evaluateRuntimePolicyDrift
 ];
 
 export interface EvaluatePoliciesOptions {
@@ -319,6 +320,67 @@ function evaluateCircularReferences(context: RuleContext): DriftFinding[] {
       visit(neighbor, target, nextTrail);
     }
   }
+}
+
+function evaluateRuntimePolicyDrift(context: RuleContext): DriftFinding[] {
+  const findings: DriftFinding[] = [];
+
+  const instructionFiles = context.sourceFiles.filter((file) =>
+    file.fileType === "AGENTS_MD" ||
+    file.fileType === "CLAUDE_MD" ||
+    file.fileType === "GEMINI_MD" ||
+    file.fileType === "COPILOT_INSTRUCTIONS" ||
+    file.fileType === "GITHUB_INSTRUCTIONS" ||
+    file.fileType === "CURSOR_RULES" ||
+    file.fileType === "GENERIC_AI_INSTRUCTIONS"
+  );
+
+  const runtimePolicyFiles = context.sourceFiles.filter((file) =>
+    file.fileType === "NEMOCLAW_POLICY" ||
+    file.fileType === "NEMOCLAW_INFERENCE_PROFILE" ||
+    file.fileType === "COPILOT_CONFIG"
+  );
+
+  if (instructionFiles.length === 0 || runtimePolicyFiles.length === 0) {
+    return findings;
+  }
+
+  const securityInstructions = instructionFiles.flatMap((file) =>
+    file.directives.filter((d) => d.category === "security")
+  );
+
+  const policyDirectives = runtimePolicyFiles.flatMap((file) =>
+    file.directives.filter((d) => d.category === "security" || d.category === "workflow")
+  );
+
+  for (const instr of securityInstructions) {
+    for (const policy of policyDirectives) {
+      const sameIntent = overlapRatio(instr.normalizedText, policy.normalizedText) > 0.6;
+      const polarityMismatch =
+        polarity(instr) !== polarity(policy) &&
+        polarity(instr) !== "neutral" &&
+        polarity(policy) !== "neutral";
+
+      if (!sameIntent || !polarityMismatch) {
+        continue;
+      }
+
+      findings.push(
+        buildFinding(context, {
+          type: "runtime-policy-drift",
+          severity: "high",
+          summary: "Runtime policy appears to contradict code-level security instructions",
+          explanation: `A runtime policy directive ("${policy.rawText}") appears to conflict with a code-level instruction ("${instr.rawText}").`,
+          affectedFiles: distinctSourcePaths(context.sourceFiles, [instr, policy]),
+          affectedScope: instr.scope,
+          suggestedRemediation:
+            "Align NemoClaw/OpenShell policies and Copilot configs with the security expectations documented in AGENTS.md and other instruction files, or update the instructions to match the approved runtime posture."
+        })
+      );
+    }
+  }
+
+  return dedupeFindings(findings);
 }
 
 function buildFinding(

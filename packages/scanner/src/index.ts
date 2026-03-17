@@ -562,6 +562,33 @@ function isSupportedInstructionPath(relativePath: string, config: LocalBaselineC
     return true;
   }
 
+  if (
+    relativePath === ".cursor/rules" ||
+    relativePath === ".cursor/rules.md" ||
+    relativePath === ".github/copilot.yaml" ||
+    relativePath === "copilot.yaml" ||
+    relativePath === "nemoclaw.yaml" ||
+    relativePath === "nemoclaw.yml" ||
+    relativePath === "openshell-policy.yaml" ||
+    relativePath === "inference-profiles.yaml" ||
+    relativePath === "inference-profiles.yml" ||
+    relativePath === "SOUL.md" ||
+    relativePath === "TOOLS.md" ||
+    relativePath === "MEMORY.md" ||
+    relativePath === "AI.md" ||
+    relativePath === "AI-RULES.md"
+  ) {
+    return true;
+  }
+
+  if (relativePath.startsWith(".windsurf/") && relativePath.endsWith(".md")) {
+    return true;
+  }
+
+  if (relativePath.startsWith("policies/") && relativePath.endsWith(".yaml")) {
+    return true;
+  }
+
   return (config.additionalInstructionPaths ?? []).map(normalizePath).includes(normalizePath(relativePath));
 }
 

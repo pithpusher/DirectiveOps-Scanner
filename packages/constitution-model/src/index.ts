@@ -4,6 +4,15 @@ export type InstructionFileType =
   | "GEMINI_MD"
   | "COPILOT_INSTRUCTIONS"
   | "GITHUB_INSTRUCTIONS"
+  | "CURSOR_RULES"
+  | "WINDSURF_INSTRUCTIONS"
+  | "COPILOT_CONFIG"
+  | "NEMOCLAW_POLICY"
+  | "NEMOCLAW_INFERENCE_PROFILE"
+  | "OPENCLAW_SOUL"
+  | "OPENCLAW_TOOLS"
+  | "OPENCLAW_MEMORY"
+  | "GENERIC_AI_INSTRUCTIONS"
   | "PROMPT_FILE"
   | "UNKNOWN";
 
@@ -41,6 +50,13 @@ export type ParserKind =
   | "claude-markdown"
   | "gemini-markdown"
   | "copilot-markdown"
+  | "cursor-markdown"
+  | "windsurf-markdown"
+  | "copilot-config"
+  | "nemoclaw-policy"
+  | "nemoclaw-inference"
+  | "openclaw-markdown"
+  | "generic-ai-markdown"
   | "generic-markdown";
 
 export interface SourceLocation {
@@ -173,6 +189,15 @@ export const FILE_PRECEDENCE: Record<InstructionFileType, number> = {
   GEMINI_MD: 65,
   COPILOT_INSTRUCTIONS: 80,
   GITHUB_INSTRUCTIONS: 75,
+  CURSOR_RULES: 60,
+  WINDSURF_INSTRUCTIONS: 60,
+  COPILOT_CONFIG: 78,
+  NEMOCLAW_POLICY: 68,
+  NEMOCLAW_INFERENCE_PROFILE: 55,
+  OPENCLAW_SOUL: 62,
+  OPENCLAW_TOOLS: 62,
+  OPENCLAW_MEMORY: 50,
+  GENERIC_AI_INSTRUCTIONS: 45,
   PROMPT_FILE: 40,
   UNKNOWN: 10
 };

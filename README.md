@@ -1,12 +1,12 @@
 # DirectiveOps Scanner
 
-DirectiveOps Scanner is an open-source CLI for scanning `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, GitHub Copilot instructions, and related AI coding agent instruction files in a repository.
+DirectiveOps Scanner is an open-source CLI for scanning `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, GitHub Copilot instructions, Cursor rules, NemoClaw/OpenShell policy yaml, and related AI coding agent instruction and policy files in a repository.
 
 It helps engineering teams discover instruction files, normalize directives, detect drift or conflicts, and export JSON or Markdown reports. The free scanner is built for local repository analysis. Teams that need multi-repo visibility, rollout workflows, dashboards, policy management, and audit history should use the hosted product at [DirectiveOps](https://www.directiveops.dev/).
 
 ## What it does
 
-- Scans common AI instruction files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, and `.github/instructions/*.instructions.md`
+- Scans common AI instruction files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, `.cursor/rules`, and `AI.md`
 - Normalizes extracted instructions into a constitution-style model
 - Detects basic drift, conflict, risky import, stale reference, and required-directive findings
 - Exports machine-readable JSON and human-readable Markdown reports
@@ -36,6 +36,14 @@ By default, the scanner discovers:
 - `GEMINI.md`
 - `.github/copilot-instructions.md`
 - `.github/instructions/*.instructions.md`
+- `.cursor/rules` or `.cursor/rules.md`
+- `.windsurf/*.md`
+- `.github/copilot.yaml` and `copilot.yaml`
+- `nemoclaw.yaml`, `nemoclaw.yml`, `openshell-policy.yaml`
+- `inference-profiles.yaml` / `inference-profiles.yml`
+- `policies/*.yaml`
+- `SOUL.md`, `TOOLS.md`, `MEMORY.md`
+- `AI.md`, `AI-RULES.md`
 - Any additional paths configured in `directiveops.config.json`
 
 ## What it produces
@@ -90,7 +98,7 @@ Use DirectiveOps Scanner to inventory agent instruction files and see what guida
 
 ### Detect prompt or policy drift
 
-Run the scanner against a repo baseline to flag required directives, conflicts, and risky imports.
+Run the scanner against a repo baseline to flag required directives, conflicts, risky imports, and basic drift between code-level instructions and runtime policies such as NemoClaw/OpenShell yaml or Copilot configs.
 
 ### Generate compliance-style reports
 
@@ -204,4 +212,4 @@ If you are evaluating the free scanner and need governance across repositories, 
 
 ## Keywords
 
-AI instruction file scanner, `AGENTS.md` scanner, `CLAUDE.md` scanner, `GEMINI.md` scanner, GitHub Copilot instruction scanner, prompt governance, instruction drift detection, policy drift scanner, repository compliance scanner, developer tooling CLI.
+AI instruction file scanner, `AGENTS.md` scanner, `CLAUDE.md` scanner, `GEMINI.md` scanner, GitHub Copilot instruction scanner, Cursor rules scanner, NemoClaw policy yaml scanner, OpenShell policy scanner, prompt governance, instruction drift detection, policy drift scanner, repository compliance scanner, developer tooling CLI.
