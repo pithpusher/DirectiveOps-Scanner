@@ -5,15 +5,17 @@ import {
   type ConstitutionLayer,
   type DirectiveCategory,
   type DirectiveConflict,
+  type InstructionScope,
   type InstructionReference,
   type NormalizedDirective,
   type NormalizedInstructionFile,
   type OwnershipReference,
   type ValidationMessage
 } from "@directiveops/constitution-model";
-import { inferDirectiveCategory, inferDirectiveStrength } from "./categories";
+import { inferDirectiveStrength, mergeDirectiveCategory, type DirectiveCategorySource } from "./categories";
 import { detectInstructionFileType, detectParserKind, inferScope } from "./file-types";
-import { extractMetadata, extractSections, makeLocation, toExtractionMethod } from "./markdown";
+import { splitFrontMatter } from "./front-matter";
+import { extractMetadata, extractInlineReferences, extractSections, makeLocation, toExtractionMethod } from "./markdown";
 
 export interface ParseInstructionInput {
   organizationId: string;
@@ -34,9 +36,83 @@ export interface BuildConstitutionInput {
 
 const imperativePattern = /\b(always|never|must|should|prefer|avoid|keep|use|document|required|do not)\b/i;
 
+/** 0-based line indices inside fenced code blocks (opening, body, and closing fence lines). */
+function lineIndicesInCodeFences(lines: string[]): Set<number> {
+  const skip = new Set<number>();
+  let inFence = false;
+  let openLen = 0;
+  let marker: "`" | "~" | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const fenceMatch = line.match(/^(`{3,}|~{3,})/);
+
+    if (inFence) {
+      skip.add(i);
+      if (fenceMatch?.[1] && marker) {
+        const fence = fenceMatch[1];
+        const m = fence[0] as "`" | "~";
+        if (m === marker && fence.length >= openLen) {
+          inFence = false;
+          marker = null;
+          openLen = 0;
+        }
+      }
+      continue;
+    }
+
+    if (fenceMatch?.[1]) {
+      const fence = fenceMatch[1];
+      marker = fence[0] as "`" | "~";
+      openLen = fence.length;
+      inFence = true;
+      skip.add(i);
+    }
+  }
+
+  return skip;
+}
+
+/** Indented CommonMark-style code blocks (4 spaces or tab). */
+function lineIndicesInIndentedCodeBlocks(lines: string[]): Set<number> {
+  const skip = new Set<number>();
+  let inBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const isBlank = line.trim() === "";
+    const isIndented = /^(?: {4}|\t)/.test(line);
+    const isStart = /^(?: {4}\S|\t\S)/.test(line);
+
+    if (!inBlock) {
+      if (isStart) {
+        inBlock = true;
+        skip.add(i);
+      }
+    } else {
+      if (!isBlank && !isIndented) {
+        inBlock = false;
+        continue;
+      }
+      skip.add(i);
+    }
+  }
+
+  return skip;
+}
+
+function stripLeadingBlockquotes(line: string): string {
+  let t = line.trim();
+  while (/^>/.test(t)) {
+    t = t.replace(/^>\s?/, "").trim();
+  }
+  return t;
+}
+
 function normalizeDirectiveText(text: string): string {
   return text
     .replace(/^[-*]\s*/, "")
+    .replace(/^\d+\.\s+/, "")
     .replace(/\.$/, "")
     .trim()
     .toLowerCase()
@@ -45,7 +121,13 @@ function normalizeDirectiveText(text: string): string {
 
 function extractImports(path: string, content: string): InstructionReference[] {
   const metadata = extractMetadata(content);
-  return metadata.imports.map((target, index) => ({
+  const targets = new Set(metadata.imports);
+  for (const line of content.split(/\r?\n/)) {
+    for (const t of extractInlineReferences(line)) {
+      targets.add(t);
+    }
+  }
+  return [...targets].map((target, index) => ({
     target,
     targetType: /^https?:\/\//.test(target) ? "url" : target.endsWith(".md") ? "file" : "unknown",
     relationship: path === "CLAUDE.md" ? "extends" : "imports",
@@ -58,30 +140,55 @@ function extractDirectives(
   content: string,
   sections = extractSections(content),
   owners: OwnershipReference[],
-  scope: ReturnType<typeof inferScope>
+  scope: ReturnType<typeof inferScope>,
+  lineOffset = 0
 ): NormalizedDirective[] {
   const lines = content.split(/\r?\n/);
+  const fenceSkip = lineIndicesInCodeFences(lines);
+  const indentSkip = lineIndicesInIndentedCodeBlocks(lines);
   const directives: NormalizedDirective[] = [];
 
   lines.forEach((line, index) => {
+    if (fenceSkip.has(index) || indentSkip.has(index)) {
+      return;
+    }
+
     const trimmed = line.trim();
-    if (!trimmed || /^#/.test(trimmed) || /^Scope:/i.test(trimmed) || /^Owners?:/i.test(trimmed) || /^Imports?:/i.test(trimmed)) {
+    if (!trimmed) {
       return;
     }
 
-    const isBullet = /^[-*]\s+/.test(trimmed);
-    const isImperativeSentence = imperativePattern.test(trimmed);
-
-    if (!isBullet && !isImperativeSentence) {
+    const unquoted = stripLeadingBlockquotes(trimmed);
+    if (!unquoted) {
       return;
     }
 
-    const normalizedText = normalizeDirectiveText(trimmed);
-    const category = inferDirectiveCategory(normalizedText);
+    const metaLine = unquoted;
+    if (
+      /^#/.test(unquoted) ||
+      /^Scope:/i.test(metaLine) ||
+      /^Owners?:/i.test(metaLine) ||
+      /^Imports?:/i.test(metaLine)
+    ) {
+      return;
+    }
+
+    const isBullet = /^[-*]\s+/.test(unquoted);
+    const isNumbered = /^\d+\.\s+/.test(unquoted);
+    const isImperativeSentence = imperativePattern.test(unquoted);
+
+    if (!isBullet && !isNumbered && !isImperativeSentence) {
+      return;
+    }
+
+    const normalizedText = normalizeDirectiveText(unquoted);
     const section = sections.find(
       (candidate) => index + 1 >= candidate.location.lineStart && index + 1 <= candidate.location.lineEnd
     );
-    const confidence = isBullet ? 0.95 : 0.72;
+    const sectionPath = section?.path ?? [];
+    const { category, categorySource } = mergeDirectiveCategory(normalizedText, sectionPath);
+    const baseConfidence = isBullet || isNumbered ? 0.95 : 0.72;
+    const confidence = categorySource === "section" ? Math.min(0.85, baseConfidence) : baseConfidence;
 
     directives.push({
       id: `directive-${index + 1}-${normalizedText.slice(0, 24).replace(/[^a-z0-9]+/g, "-")}`,
@@ -89,16 +196,16 @@ function extractDirectives(
       rawText: trimmed,
       normalizedText,
       category,
-      strength: inferDirectiveStrength(trimmed),
+      strength: inferDirectiveStrength(unquoted),
       scope,
       tags: buildTags(category, normalizedText),
       owners,
-      appliesTo: inferAppliesTo(section?.path ?? []),
+      appliesTo: inferAppliesTo(sectionPath),
       extractionMethod: toExtractionMethod(confidence),
       confidence,
-      location: makeLocation(index + 1),
+      location: makeLocation(index + 1 + lineOffset),
       sourceSectionId: section?.id,
-      metadata: buildDirectiveMetadata(trimmed, category)
+      metadata: buildDirectiveMetadata(unquoted, category, categorySource)
     });
   });
 
@@ -126,10 +233,15 @@ function inferAppliesTo(sectionPath: string[]): string[] {
   return sectionPath.map((segment) => segment.toLowerCase());
 }
 
-function buildDirectiveMetadata(text: string, category: DirectiveCategory): Record<string, string | boolean> {
+function buildDirectiveMetadata(
+  text: string,
+  category: DirectiveCategory,
+  categorySource: DirectiveCategorySource
+): Record<string, string | boolean> {
   const lower = text.toLowerCase();
   return {
     categoryHint: category,
+    categorySource,
     negativePolarity: /\b(never|do not|avoid)\b/.test(lower),
     positivePolarity: /\b(always|must|required|keep)\b/.test(lower)
   };
@@ -138,11 +250,38 @@ function buildDirectiveMetadata(text: string, category: DirectiveCategory): Reco
 export function parseInstructionFile(input: ParseInstructionInput): NormalizedInstructionFile {
   const fileType = detectInstructionFileType(input.path);
   const parserKind = detectParserKind(input.path);
-  const sections = extractSections(input.content);
-  const metadata = extractMetadata(input.content);
+  const { body, lineOffset, directiveops } = splitFrontMatter(input.content);
+  const sections = extractSections(body);
+  const metadata = extractMetadata(body);
   const scope = inferScope(input.path, metadata.scope);
-  const imports = extractImports(input.path, input.content);
-  const directives = extractDirectives(input.content, sections, metadata.owners, scope);
+  const baseRefs = extractImports(input.path, body);
+  const orderedTargets: string[] = [];
+  const seenTargets = new Set<string>();
+  for (const ref of baseRefs) {
+    if (!seenTargets.has(ref.target)) {
+      seenTargets.add(ref.target);
+      orderedTargets.push(ref.target);
+    }
+  }
+  if (directiveops?.imports && Array.isArray(directiveops.imports)) {
+    for (const entry of directiveops.imports) {
+      if (typeof entry === "string" && entry.trim()) {
+        const t = entry.trim();
+        if (!seenTargets.has(t)) {
+          seenTargets.add(t);
+          orderedTargets.push(t);
+        }
+      }
+    }
+  }
+  const imports: InstructionReference[] = orderedTargets.map((target, index) => ({
+    target,
+    targetType: /^https?:\/\//.test(target) ? "url" : target.endsWith(".md") ? "file" : "unknown",
+    relationship: input.path === "CLAUDE.md" ? "extends" : "imports",
+    location: makeLocation(index + 1),
+    extractionMethod: target.endsWith(".md") || /^https?:\/\//.test(target) ? "deterministic" : "heuristic"
+  }));
+  const directives = extractDirectives(body, sections, metadata.owners, scope, lineOffset);
   const validation: ValidationMessage[] = [];
 
   if (directives.length === 0) {
@@ -161,6 +300,14 @@ export function parseInstructionFile(input: ParseInstructionInput): NormalizedIn
     });
   }
 
+  if (directiveops && Object.keys(directiveops).length > 0) {
+    validation.push({
+      level: "warning",
+      source: "parser",
+      message: "YAML front matter included a directiveops block; policy rules can align with these hints."
+    });
+  }
+
   const parserConfidence = directives.length > 0 ? Math.max(0.7, average(directives.map((directive) => directive.confidence))) : 0.55;
 
   return {
@@ -172,6 +319,7 @@ export function parseInstructionFile(input: ParseInstructionInput): NormalizedIn
     scope,
     precedence: inferPrecedence(fileType, input.path),
     rawContent: input.content,
+    directiveopsMetadata: directiveops,
     sections,
     imports,
     directives,
@@ -242,7 +390,7 @@ function detectDirectiveConflicts(files: NormalizedInstructionFile[]): Directive
     string,
     {
       category: DirectiveCategory;
-      scope: string;
+      scope: InstructionScope;
       entries: Array<{ directiveId: string; filePath: string; normalizedText: string }>;
     }
   >();
@@ -275,7 +423,7 @@ function detectDirectiveConflicts(files: NormalizedInstructionFile[]): Directive
       conflicts.push({
         key,
         category: value.category,
-        scope: (value.scope as unknown) as any,
+        scope: value.scope,
         directiveIds: value.entries.map((entry) => entry.directiveId),
         filePaths: Array.from(new Set(value.entries.map((entry) => entry.filePath)))
       });
@@ -286,6 +434,6 @@ function detectDirectiveConflicts(files: NormalizedInstructionFile[]): Directive
 }
 
 function average(values: number[]): number {
+  if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
-

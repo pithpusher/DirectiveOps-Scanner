@@ -1,42 +1,19 @@
 {
-  "name": "@directiveops/scanner-cli",
+  "name": "@directiveops/cli",
   "version": "0.1.0",
-  "private": false,
-  "description": "CLI for scanning AGENTS.md, CLAUDE.md, GEMINI.md, and Copilot instruction files to detect AI instruction drift, conflicts, and risks.",
-  "keywords": [
-    "ai",
-    "agents",
-    "agents-md",
-    "claude-md",
-    "gemini-md",
-    "copilot-instructions",
-    "prompt-governance",
-    "policy-drift",
-    "repository-scanner",
-    "compliance",
-    "cli",
-    "directiveops"
-  ],
-  "homepage": "https://www.directiveops.dev/",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/pithpusher/DirectiveOps-Scanner.git"
-  },
-  "bugs": {
-    "url": "https://github.com/pithpusher/DirectiveOps-Scanner/issues"
-  },
-  "license": "MIT",
+  "private": true,
   "type": "module",
   "bin": {
-    "directiveops-scanner": "dist/index.js"
+    "directiveops": "./src/index.ts"
   },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "scan": "tsx src/index.ts scan",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@directiveops/constitution-model": "0.1.0",
+    "@directiveops/parser": "0.1.0",
+    "@directiveops/policy-engine": "0.1.0",
     "@directiveops/scanner": "0.1.0"
   }
 }

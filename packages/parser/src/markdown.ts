@@ -147,6 +147,21 @@ export function extractInlineReferences(line: string): string[] {
     }
   });
 
+  const autolinks = [...line.matchAll(/<([^>\s]+)>/g)];
+  autolinks.forEach((match) => {
+    const target = match[1];
+    if (
+      target &&
+      (target.startsWith("http") ||
+        target.endsWith(".md") ||
+        target.includes("/") ||
+        target.startsWith(".") ||
+        target.startsWith("@"))
+    ) {
+      results.add(target);
+    }
+  });
+
   return [...results];
 }
 
@@ -160,4 +175,3 @@ export function makeLocation(lineStart: number, lineEnd = lineStart): SourceLoca
 export function toExtractionMethod(confidence: number): ExtractionMethod {
   return confidence >= 0.9 ? "deterministic" : "heuristic";
 }
-

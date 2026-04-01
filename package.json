@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "scan": "tsx apps/cli/src/index.ts scan --path .",
+    "sync:check": "node scripts/sync-check.mjs",
+    "sync:copy": "node scripts/sync-copy.mjs",
     "typecheck": "npm run typecheck --workspace @directiveops/scanner && npm run typecheck --workspace @directiveops/parser && npm run typecheck --workspace @directiveops/constitution-model && npm run typecheck --workspace @directiveops/policy-engine && npm run typecheck --workspace @directiveops/oss-types",
     "build": "npm run build --workspace @directiveops/scanner && npm run build --workspace @directiveops/parser && npm run build --workspace @directiveops/constitution-model && npm run build --workspace @directiveops/policy-engine && npm run build --workspace @directiveops/oss-types"
   },
@@ -18,4 +20,3 @@
     "typescript": "^5.8.2"
   }
 }
-

@@ -3,11 +3,20 @@ import type { DirectiveCategory, DirectiveStrength } from "@directiveops/constit
 const categoryMap: Array<{ category: DirectiveCategory; patterns: RegExp[] }> = [
   {
     category: "testing",
-    patterns: [/\btest\b/i, /\btests\b/i, /\bintegration\b/i, /\bunit\b/i, /\blint\b/i]
+    patterns: [/\btest\b/i, /\btests\b/i, /\bintegration\b/i, /\bunit\b/i, /\blint\b/i, /\bci\b/i]
   },
   {
     category: "security",
-    patterns: [/\bsecret\b/i, /\bsecurity\b/i, /\btoken\b/i, /\bcredential\b/i, /\bscan\b/i]
+    patterns: [
+      /\bsecret\b/i,
+      /\bsecurity\b/i,
+      /\btoken\b/i,
+      /\bcredential\b/i,
+      /\bscan\b/i,
+      /\bpii\b/i,
+      /\bsoc2\b/i,
+      /\bvulnerability\b/i
+    ]
   },
   {
     category: "workflow",
@@ -32,8 +41,14 @@ const categoryMap: Array<{ category: DirectiveCategory; patterns: RegExp[] }> = 
   {
     category: "release",
     patterns: [/\brelease\b/i, /\bdeploy\b/i, /\bmigration\b/i]
+  },
+  {
+    category: "quality",
+    patterns: [/\bobservability\b/i, /\bslo\b/i, /\bsli\b/i, /\bmetrics\b/i, /\bmonitoring\b/i, /\bquality\b/i]
   }
 ];
+
+export type DirectiveCategorySource = "text" | "section" | "unknown";
 
 export function inferDirectiveCategory(text: string): DirectiveCategory {
   for (const entry of categoryMap) {
@@ -42,6 +57,36 @@ export function inferDirectiveCategory(text: string): DirectiveCategory {
     }
   }
   return "unknown";
+}
+
+/** Normalize heading path segments and join for category keyword matching (same ordered map as line text). */
+export function normalizeSectionPathForCategory(path: string[]): string {
+  return path
+    .map((segment) => segment.trim().toLowerCase().replace(/:\s*$/, ""))
+    .filter(Boolean)
+    .join(" > ");
+}
+
+export function inferDirectiveCategoryFromSectionPath(path: string[]): DirectiveCategory {
+  if (path.length === 0) {
+    return "unknown";
+  }
+  return inferDirectiveCategory(normalizeSectionPathForCategory(path));
+}
+
+export function mergeDirectiveCategory(
+  normalizedDirectiveText: string,
+  sectionPath: string[]
+): { category: DirectiveCategory; categorySource: DirectiveCategorySource } {
+  const textCategory = inferDirectiveCategory(normalizedDirectiveText);
+  if (textCategory !== "unknown") {
+    return { category: textCategory, categorySource: "text" };
+  }
+  const sectionCategory = inferDirectiveCategoryFromSectionPath(sectionPath);
+  if (sectionCategory !== "unknown") {
+    return { category: sectionCategory, categorySource: "section" };
+  }
+  return { category: "unknown", categorySource: "unknown" };
 }
 
 export function inferDirectiveStrength(text: string): DirectiveStrength {

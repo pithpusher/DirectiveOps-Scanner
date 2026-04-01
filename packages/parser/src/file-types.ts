@@ -1,113 +1,162 @@
 import type { InstructionFileType, InstructionScope, ParserKind } from "@directiveops/constitution-model";
 
-export function detectInstructionFileType(path: string): InstructionFileType {
-  if (path === "AGENTS.md") return "AGENTS_MD";
-  if (path === "CLAUDE.md") return "CLAUDE_MD";
-  if (path === "GEMINI.md") return "GEMINI_MD";
-  if (path === ".github/copilot-instructions.md") return "COPILOT_INSTRUCTIONS";
-  if (path.startsWith(".github/instructions/") && path.endsWith(".instructions.md")) {
-    return "GITHUB_INSTRUCTIONS";
+export interface InstructionFileMatch {
+  pattern: RegExp;
+  fileType: InstructionFileType;
+  parserKind: ParserKind;
+  defaultScope: InstructionScope;
+}
+
+const INSTRUCTION_FILE_REGISTRY: InstructionFileMatch[] = [
+  {
+    pattern: /^AGENTS\.md$/,
+    fileType: "AGENTS_MD",
+    parserKind: "agents-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^AGENTS\.override\.md$/,
+    fileType: "AGENTS_OVERRIDE_MD",
+    parserKind: "agents-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^CLAUDE\.md$/,
+    fileType: "CLAUDE_MD",
+    parserKind: "claude-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^GEMINI\.md$/,
+    fileType: "GEMINI_MD",
+    parserKind: "gemini-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^\.github\/copilot-instructions\.md$/,
+    fileType: "COPILOT_INSTRUCTIONS",
+    parserKind: "copilot-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^\.github\/instructions\/.+\.instructions\.md$/,
+    fileType: "GITHUB_INSTRUCTIONS",
+    parserKind: "generic-markdown",
+    defaultScope: "directory"
+  },
+  {
+    pattern: /^\.cursor\/rules(\.md)?$/,
+    fileType: "CURSOR_RULES",
+    parserKind: "cursor-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^\.windsurf\/.+\.md$/,
+    fileType: "WINDSURF_INSTRUCTIONS",
+    parserKind: "windsurf-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^(\.github\/)?copilot\.yaml$/,
+    fileType: "COPILOT_CONFIG",
+    parserKind: "copilot-config",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^nemoclaw\.ya?ml$/,
+    fileType: "NEMOCLAW_POLICY",
+    parserKind: "nemoclaw-policy",
+    defaultScope: "tool"
+  },
+  {
+    pattern: /^openshell-policy\.ya?ml$/,
+    fileType: "NEMOCLAW_POLICY",
+    parserKind: "nemoclaw-policy",
+    defaultScope: "tool"
+  },
+  {
+    pattern: /^inference-profiles\.ya?ml$/,
+    fileType: "NEMOCLAW_INFERENCE_PROFILE",
+    parserKind: "nemoclaw-inference",
+    defaultScope: "tool"
+  },
+  {
+    pattern: /^policies\/.+\.ya?ml$/,
+    fileType: "NEMOCLAW_POLICY",
+    parserKind: "nemoclaw-policy",
+    defaultScope: "tool"
+  },
+  {
+    pattern: /^SOUL\.md$/,
+    fileType: "OPENCLAW_SOUL",
+    parserKind: "openclaw-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^TOOLS\.md$/,
+    fileType: "OPENCLAW_TOOLS",
+    parserKind: "openclaw-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^MEMORY\.md$/,
+    fileType: "OPENCLAW_MEMORY",
+    parserKind: "openclaw-markdown",
+    defaultScope: "repository"
+  },
+  {
+    pattern: /^AI(-RULES)?\.md$/,
+    fileType: "GENERIC_AI_INSTRUCTIONS",
+    parserKind: "generic-ai-markdown",
+    defaultScope: "repository"
   }
-  if (path === ".cursor/rules" || path === ".cursor/rules.md") {
-    return "CURSOR_RULES";
+];
+
+export function matchInstructionFile(filePath: string): InstructionFileMatch | undefined {
+  const normalized = filePath.replace(/\\/g, "/");
+  return INSTRUCTION_FILE_REGISTRY.find((entry) => entry.pattern.test(normalized));
+}
+
+export function detectInstructionFileType(filePath: string): InstructionFileType {
+  const matched = matchInstructionFile(filePath);
+  if (matched) {
+    return matched.fileType;
   }
-  if (path.startsWith(".windsurf/") && path.endsWith(".md")) {
-    return "WINDSURF_INSTRUCTIONS";
-  }
-  if (path === ".github/copilot.yaml" || path === "copilot.yaml") {
-    return "COPILOT_CONFIG";
-  }
-  if (path === "nemoclaw.yaml" || path === "nemoclaw.yml") {
-    return "NEMOCLAW_POLICY";
-  }
-  if (path === "openshell-policy.yaml") {
-    return "NEMOCLAW_POLICY";
-  }
-  if (path === "inference-profiles.yaml" || path === "inference-profiles.yml") {
-    return "NEMOCLAW_INFERENCE_PROFILE";
-  }
-  if (path.startsWith("policies/") && path.endsWith(".yaml")) {
-    return "NEMOCLAW_POLICY";
-  }
-  if (path === "SOUL.md") return "OPENCLAW_SOUL";
-  if (path === "TOOLS.md") return "OPENCLAW_TOOLS";
-  if (path === "MEMORY.md") return "OPENCLAW_MEMORY";
-  if (path === "AI.md" || path === "AI-RULES.md") {
-    return "GENERIC_AI_INSTRUCTIONS";
-  }
-  if (path.includes("prompt") || path.includes("instructions")) {
+  if (filePath.includes("prompt") || filePath.includes("instructions")) {
     return "PROMPT_FILE";
   }
   return "UNKNOWN";
 }
 
-export function detectParserKind(path: string): ParserKind {
-  const fileType = detectInstructionFileType(path);
-  switch (fileType) {
-    case "AGENTS_MD":
-      return "agents-markdown";
-    case "CLAUDE_MD":
-      return "claude-markdown";
-    case "GEMINI_MD":
-      return "gemini-markdown";
-    case "COPILOT_INSTRUCTIONS":
-      return "copilot-markdown";
-    case "CURSOR_RULES":
-      return "cursor-markdown";
-    case "WINDSURF_INSTRUCTIONS":
-      return "windsurf-markdown";
-    case "COPILOT_CONFIG":
-      return "copilot-config";
-    case "NEMOCLAW_POLICY":
-      return "nemoclaw-policy";
-    case "NEMOCLAW_INFERENCE_PROFILE":
-      return "nemoclaw-inference";
-    case "OPENCLAW_SOUL":
-    case "OPENCLAW_TOOLS":
-    case "OPENCLAW_MEMORY":
-      return "openclaw-markdown";
-    case "GENERIC_AI_INSTRUCTIONS":
-      return "generic-ai-markdown";
-    default:
-      return "generic-markdown";
+export function detectParserKind(filePath: string): ParserKind {
+  const matched = matchInstructionFile(filePath);
+  if (matched) {
+    return matched.parserKind;
   }
+  return "generic-markdown";
 }
 
-export function inferScope(path: string, explicitScope?: string): InstructionScope {
+export function inferScope(filePath: string, explicitScope?: string): InstructionScope {
   if (explicitScope) {
     const normalized = explicitScope.trim().toLowerCase();
-    if (normalized === "organization" || normalized === "repository" || normalized === "directory" || normalized === "file" || normalized === "workflow" || normalized === "tool") {
+    if (
+      normalized === "organization" ||
+      normalized === "repository" ||
+      normalized === "directory" ||
+      normalized === "file" ||
+      normalized === "workflow" ||
+      normalized === "tool"
+    ) {
       return normalized;
     }
   }
 
-  if (path === "AGENTS.md" || path === "CLAUDE.md" || path === "GEMINI.md" || path === ".github/copilot-instructions.md") {
-    return "repository";
+  const matched = matchInstructionFile(filePath);
+  if (matched) {
+    return matched.defaultScope;
   }
-  if (path.startsWith(".github/instructions/")) {
-    return "directory";
-  }
-  if (path === ".cursor/rules" || path === ".cursor/rules.md") {
-    return "repository";
-  }
-  if (path.startsWith(".windsurf/")) {
-    return "repository";
-  }
-  if (path === ".github/copilot.yaml" || path === "copilot.yaml") {
-    return "repository";
-  }
-  if (path === "nemoclaw.yaml" || path === "nemoclaw.yml" || path === "openshell-policy.yaml") {
-    return "tool";
-  }
-  if (path === "inference-profiles.yaml" || path === "inference-profiles.yml" || path.startsWith("policies/")) {
-    return "tool";
-  }
-  if (path === "SOUL.md" || path === "TOOLS.md" || path === "MEMORY.md" || path === "AI.md" || path === "AI-RULES.md") {
-    return "repository";
-  }
-  if (path.includes("/workflows/")) {
+  if (filePath.includes("/workflows/")) {
     return "workflow";
   }
   return "unknown";
 }
-

@@ -1,5 +1,7 @@
 import type { ConstitutionGraph, NormalizedDirective, NormalizedInstructionFile } from "@directiveops/constitution-model";
 import type { DriftFinding, PolicyRule, RepoOverride } from "@directiveops/oss-types";
+import { scanInstructionFilesForQualityFindings } from "./directive-quality";
+import { scanInstructionFilesForSecurityFindings } from "./directive-security";
 
 export interface EvaluatePoliciesInput {
   organizationId: string;
@@ -23,6 +25,7 @@ export type RuleEvaluator = (context: RuleContext) => DriftFinding[];
 
 export const DEFAULT_RULE_EVALUATORS: RuleEvaluator[] = [
   evaluateRequiredDirectives,
+  evaluateRequiredContent,
   evaluateDuplicateDirectives,
   evaluateConflicts,
   evaluateStaleReferences,
@@ -31,17 +34,16 @@ export const DEFAULT_RULE_EVALUATORS: RuleEvaluator[] = [
   evaluateUndocumentedOverrides,
   evaluateScopeContradictions,
   evaluateCircularReferences,
-  evaluateRuntimePolicyDrift
+  evaluateRuntimePolicyDrift,
+  evaluateDirectiveContentSecurity,
+  evaluateDirectiveQualityBudget
 ];
 
 export interface EvaluatePoliciesOptions {
   evaluators?: RuleEvaluator[];
 }
 
-export function evaluatePolicies(
-  input: EvaluatePoliciesInput,
-  options?: EvaluatePoliciesOptions
-): DriftFinding[] {
+export function evaluatePolicies(input: EvaluatePoliciesInput, options?: EvaluatePoliciesOptions): DriftFinding[] {
   const context: RuleContext = {
     ...input,
     directives: input.constitution.layers.flatMap((layer) => layer.directives),
@@ -57,11 +59,11 @@ function evaluateRequiredDirectives(context: RuleContext): DriftFinding[] {
     .filter((rule) => rule.enabled && rule.type === "required-directive")
     .flatMap((rule) => {
       const requiredCategories = Array.isArray(rule.config.categories) ? (rule.config.categories as string[]) : [];
-      const matches = requiredCategories.every((category) =>
-        context.directives.some((directive) => directive.category === category)
+      const missing = requiredCategories.filter(
+        (category) => !context.directives.some((directive) => directive.category === category)
       );
 
-      if (matches) {
+      if (missing.length === 0) {
         return [];
       }
 
@@ -70,10 +72,87 @@ function evaluateRequiredDirectives(context: RuleContext): DriftFinding[] {
           type: "missing-required-directive",
           severity: rule.severity,
           summary: "Required directive coverage is incomplete",
-          explanation: `This repository instruction set is missing one or more required directive categories: ${requiredCategories.join(", ")}.`,
+          explanation: `This repository instruction set is missing required directive categories: ${missing.join(", ")}.`,
           affectedFiles: context.sourceFiles.map((file) => file.path),
           affectedScope: "repository",
           suggestedRemediation: "Add the missing directive to a repository-level instruction file or align with your chosen baseline template.",
+          policyRuleCode: rule.code
+        })
+      ];
+    });
+}
+
+const MAX_REQUIRED_CONTENT_PATTERN_LENGTH = 2048;
+
+function sourceFilesMatchingPathPatterns(
+  files: NormalizedInstructionFile[],
+  pathPatterns: string[]
+): NormalizedInstructionFile[] {
+  if (pathPatterns.length === 0) {
+    return files;
+  }
+  return files.filter((file) => pathPatterns.some((pattern) => matchPathPattern(file.path, pattern)));
+}
+
+function evaluateRequiredContent(context: RuleContext): DriftFinding[] {
+  return context.policyRules
+    .filter((rule) => rule.enabled && rule.type === "required-content")
+    .flatMap((rule) => {
+      const config = rule.config as {
+        contentRuleId?: string;
+        label?: string;
+        contains?: string;
+        pattern?: string;
+        pathPatterns?: string[];
+      };
+      const pathPatterns = Array.isArray(config.pathPatterns)
+        ? config.pathPatterns.map(String).filter(Boolean)
+        : [];
+      const scopedFiles = sourceFilesMatchingPathPatterns(context.sourceFiles, pathPatterns);
+      const aggregate = scopedFiles.map((file) => file.rawContent).join("\n\n");
+      const label = config.label ?? config.contentRuleId ?? rule.code;
+
+      const hasContains = typeof config.contains === "string" && config.contains.length > 0;
+      const hasPattern = typeof config.pattern === "string" && config.pattern.length > 0;
+
+      if (hasContains === hasPattern) {
+        return [];
+      }
+
+      let satisfied = false;
+      if (hasContains) {
+        satisfied = aggregate.includes(config.contains ?? "");
+      } else if (hasPattern) {
+        if ((config.pattern ?? "").length > MAX_REQUIRED_CONTENT_PATTERN_LENGTH) {
+          return [];
+        }
+        try {
+          const regex = new RegExp(config.pattern ?? "");
+          satisfied = regex.test(aggregate);
+        } catch {
+          return [];
+        }
+      }
+
+      if (satisfied) {
+        return [];
+      }
+
+      const affectedFiles =
+        pathPatterns.length > 0 ? scopedFiles.map((file) => file.path) : context.sourceFiles.map((file) => file.path);
+      const scopeNote =
+        pathPatterns.length > 0 ? ` Scoped to files matching: ${pathPatterns.join(", ")}.` : "";
+
+      return [
+        buildFinding(context, {
+          type: "missing-required-content",
+          severity: rule.severity,
+          summary: `Required instruction content missing: ${label}`,
+          explanation: `The instruction files did not satisfy required content rule "${config.contentRuleId ?? rule.code}" (${label}).${scopeNote} Add the expected wording or pattern match.`,
+          affectedFiles,
+          affectedScope: "repository",
+          suggestedRemediation:
+            "Add the required phrase or pattern to the relevant instruction file(s) or adjust the local baseline if it no longer applies.",
           policyRuleCode: rule.code
         })
       ];
@@ -236,15 +315,14 @@ function evaluateUndocumentedOverrides(context: RuleContext): DriftFinding[] {
         explanation: `Directive "${directive.rawText}" looks like a local override, but no matching approved override record exists.`,
         affectedFiles: distinctSourcePaths(context.sourceFiles, [directive]),
         affectedScope: directive.scope,
-        suggestedRemediation: "Record this override in your governance process or remove the repo-specific exception."
+        suggestedRemediation: "Record this override in your local governance process or remove the repo-specific exception."
       })
     );
 }
 
 function evaluateScopeContradictions(context: RuleContext): DriftFinding[] {
   return context.sourceFiles.flatMap((file) => {
-    const explicitScopeMatch = /^Scope:\s*(.+)$/im.exec(file.rawContent);
-    const explicitScopeValue = explicitScopeMatch?.[1];
+    const explicitScopeValue = /^Scope:\s*(.+)$/im.exec(file.rawContent)?.[1];
     if (!explicitScopeValue) {
       return [];
     }
@@ -322,23 +400,42 @@ function evaluateCircularReferences(context: RuleContext): DriftFinding[] {
   }
 }
 
+function evaluateDirectiveContentSecurity(context: RuleContext): DriftFinding[] {
+  return scanInstructionFilesForSecurityFindings({
+    organizationId: context.organizationId,
+    repositoryId: context.repositoryId,
+    sourceFiles: context.sourceFiles,
+    buildFinding: (partial) => buildFinding(context, partial)
+  });
+}
+
+function evaluateDirectiveQualityBudget(context: RuleContext): DriftFinding[] {
+  return scanInstructionFilesForQualityFindings({
+    sourceFiles: context.sourceFiles,
+    buildFinding: (partial) => buildFinding(context, partial)
+  });
+}
+
 function evaluateRuntimePolicyDrift(context: RuleContext): DriftFinding[] {
   const findings: DriftFinding[] = [];
 
-  const instructionFiles = context.sourceFiles.filter((file) =>
-    file.fileType === "AGENTS_MD" ||
-    file.fileType === "CLAUDE_MD" ||
-    file.fileType === "GEMINI_MD" ||
-    file.fileType === "COPILOT_INSTRUCTIONS" ||
-    file.fileType === "GITHUB_INSTRUCTIONS" ||
-    file.fileType === "CURSOR_RULES" ||
-    file.fileType === "GENERIC_AI_INSTRUCTIONS"
+  const instructionFiles = context.sourceFiles.filter(
+    (file) =>
+      file.fileType === "AGENTS_MD" ||
+      file.fileType === "AGENTS_OVERRIDE_MD" ||
+      file.fileType === "CLAUDE_MD" ||
+      file.fileType === "GEMINI_MD" ||
+      file.fileType === "COPILOT_INSTRUCTIONS" ||
+      file.fileType === "GITHUB_INSTRUCTIONS" ||
+      file.fileType === "CURSOR_RULES" ||
+      file.fileType === "GENERIC_AI_INSTRUCTIONS"
   );
 
-  const runtimePolicyFiles = context.sourceFiles.filter((file) =>
-    file.fileType === "NEMOCLAW_POLICY" ||
-    file.fileType === "NEMOCLAW_INFERENCE_PROFILE" ||
-    file.fileType === "COPILOT_CONFIG"
+  const runtimePolicyFiles = context.sourceFiles.filter(
+    (file) =>
+      file.fileType === "NEMOCLAW_POLICY" ||
+      file.fileType === "NEMOCLAW_INFERENCE_PROFILE" ||
+      file.fileType === "COPILOT_CONFIG"
   );
 
   if (instructionFiles.length === 0 || runtimePolicyFiles.length === 0) {
@@ -346,19 +443,18 @@ function evaluateRuntimePolicyDrift(context: RuleContext): DriftFinding[] {
   }
 
   const securityInstructions = instructionFiles.flatMap((file) =>
-    file.directives.filter((d) => d.category === "security")
+    file.directives.filter((directive) => directive.category === "security")
   );
-
   const policyDirectives = runtimePolicyFiles.flatMap((file) =>
-    file.directives.filter((d) => d.category === "security" || d.category === "workflow")
+    file.directives.filter((directive) => directive.category === "security" || directive.category === "workflow")
   );
 
-  for (const instr of securityInstructions) {
+  for (const instruction of securityInstructions) {
     for (const policy of policyDirectives) {
-      const sameIntent = overlapRatio(instr.normalizedText, policy.normalizedText) > 0.6;
+      const sameIntent = overlapRatio(instruction.normalizedText, policy.normalizedText) > 0.6;
       const polarityMismatch =
-        polarity(instr) !== polarity(policy) &&
-        polarity(instr) !== "neutral" &&
+        polarity(instruction) !== polarity(policy) &&
+        polarity(instruction) !== "neutral" &&
         polarity(policy) !== "neutral";
 
       if (!sameIntent || !polarityMismatch) {
@@ -370,11 +466,11 @@ function evaluateRuntimePolicyDrift(context: RuleContext): DriftFinding[] {
           type: "runtime-policy-drift",
           severity: "high",
           summary: "Runtime policy appears to contradict code-level security instructions",
-          explanation: `A runtime policy directive ("${policy.rawText}") appears to conflict with a code-level instruction ("${instr.rawText}").`,
-          affectedFiles: distinctSourcePaths(context.sourceFiles, [instr, policy]),
-          affectedScope: instr.scope,
+          explanation: `A runtime policy directive ("${policy.rawText}") appears to conflict with a code-level instruction ("${instruction.rawText}").`,
+          affectedFiles: distinctSourcePaths(context.sourceFiles, [instruction, policy]),
+          affectedScope: instruction.scope,
           suggestedRemediation:
-            "Align NemoClaw/OpenShell policies and Copilot configs with the security expectations documented in AGENTS.md and other instruction files, or update the instructions to match the approved runtime posture."
+            "Align runtime policy files and Copilot config with the security expectations documented in AGENTS.md and related instruction files, or update the instructions to match the approved runtime posture."
         })
       );
     }
@@ -396,6 +492,7 @@ function buildFinding(
     affectedScope: finding.affectedScope,
     policyRuleCode: finding.policyRuleCode ?? null
   });
+
   return {
     id: `finding:${context.repositoryId}:${finding.type}:${hash(fingerprintSource)}`,
     organizationId: context.organizationId,
@@ -458,3 +555,41 @@ function hash(value: string): string {
   return Math.abs(output).toString(16);
 }
 
+function matchPathPattern(filePath: string, pattern: string): boolean {
+  const regex = globToRegExp(pattern.replace(/\\/g, "/"));
+  return regex.test(filePath.replace(/\\/g, "/"));
+}
+
+function globToRegExp(pattern: string): RegExp {
+  let output = "^";
+
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    const next = pattern[index + 1];
+
+    if (char === "*" && next === "*") {
+      output += ".*";
+      index += 1;
+      continue;
+    }
+
+    if (char === "*") {
+      output += "[^/]*";
+      continue;
+    }
+
+    if (char === "?") {
+      output += "[^/]";
+      continue;
+    }
+
+    output += escapeRegexChar(char ?? "");
+  }
+
+  output += "$";
+  return new RegExp(output);
+}
+
+function escapeRegexChar(char: string): string {
+  return /[|\\{}()[\]^$+?.]/.test(char) ? `\\${char}` : char;
+}

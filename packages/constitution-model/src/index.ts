@@ -1,5 +1,6 @@
 export type InstructionFileType =
   | "AGENTS_MD"
+  | "AGENTS_OVERRIDE_MD"
   | "CLAUDE_MD"
   | "GEMINI_MD"
   | "COPILOT_INSTRUCTIONS"
@@ -121,6 +122,8 @@ export interface NormalizedInstructionFile {
   scope: InstructionScope;
   precedence: number;
   rawContent: string;
+  /** Parsed `directiveops` mapping from YAML front matter when present. */
+  directiveopsMetadata?: Record<string, unknown>;
   sections: SectionNode[];
   imports: InstructionReference[];
   directives: NormalizedDirective[];
@@ -185,6 +188,7 @@ export interface ConstitutionDiffPreview {
 
 export const FILE_PRECEDENCE: Record<InstructionFileType, number> = {
   AGENTS_MD: 70,
+  AGENTS_OVERRIDE_MD: 72,
   CLAUDE_MD: 60,
   GEMINI_MD: 65,
   COPILOT_INSTRUCTIONS: 80,
@@ -221,3 +225,50 @@ export function sortLayersByPrecedence(layers: ConstitutionLayer[]): Constitutio
   return [...layers].sort((left, right) => right.precedence - left.precedence);
 }
 
+/* ── Quality scoring types ────────────────────────────────────── */
+
+export type QualityDimensionName =
+  | "verbosity"
+  | "staleness"
+  | "redundancy"
+  | "conflict"
+  | "consistency"
+  | "completeness"
+  | "tokenEfficiency";
+
+export interface QualityDimension {
+  name: QualityDimensionName;
+  /** 0–100 */
+  score: number;
+  /** Relative weight in composite score (decimal, sums to 1.0 across active dimensions). */
+  weight: number;
+  /** Human-readable explanations for score deductions. */
+  findings: string[];
+}
+
+export interface QualityBreakdown {
+  dimensions: QualityDimension[];
+  compositeScore: number;
+}
+
+export type QualityLabel = "excellent" | "good" | "fair" | "needs-work" | "poor";
+
+export interface FileQualityScore {
+  filePath: string;
+  fileType: InstructionFileType;
+  tokenCount: number;
+  optimalTokenRange: [number, number];
+  qualityBreakdown: QualityBreakdown;
+  estimatedMonthlyCostImpact: number;
+  label: QualityLabel;
+}
+
+export interface RepoQualityScore {
+  compositeScore: number;
+  fileScores: FileQualityScore[];
+  crossToolParityScore: number;
+  totalTokens: number;
+  estimatedMonthlyCostImpact: number;
+  totalFindings: number;
+  findingsBySeverity: { critical: number; high: number; medium: number; low: number; info: number };
+}

@@ -1,9 +1,17 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ConstitutionGraph, DirectiveCategory } from "@directiveops/constitution-model";
-import { buildConstitutionGraph } from "@directiveops/parser";
-import { evaluatePolicies } from "@directiveops/policy-engine";
+import type { ConstitutionGraph, DirectiveCategory, RepoQualityScore } from "@directiveops/constitution-model";
+import { buildConstitutionGraph, matchInstructionFile } from "@directiveops/parser";
+import { computeRepoQualityScore, evaluatePolicies, type RepoQualityContext } from "@directiveops/policy-engine";
 import type { DriftFinding, PolicyRule } from "@directiveops/oss-types";
+
+export interface RequiredContentRule {
+  id: string;
+  label?: string;
+  contains?: string;
+  pattern?: string;
+  pathPatterns?: string[];
+}
 
 export interface LocalBaselineConfig {
   additionalInstructionPaths?: string[];
@@ -14,6 +22,7 @@ export interface LocalBaselineConfig {
     category: DirectiveCategory;
     normalizedText: string;
   }>;
+  requiredContent?: RequiredContentRule[];
 }
 
 export interface ScannerRunOptions {
@@ -29,6 +38,7 @@ export interface ScannerResult {
   discoveredFiles: string[];
   constitution: ConstitutionGraph;
   findings: DriftFinding[];
+  qualityScore: RepoQualityScore;
   summary: {
     instructionFileCount: number;
     directiveCount: number;
@@ -42,6 +52,7 @@ export interface ScannerResult {
 
 const DEFAULT_IGNORE_DIRS = new Set([".git", "node_modules", ".next", "dist", "coverage"]);
 const DEFAULT_BASELINE_FILE = "directiveops.config.json";
+const MAX_BASELINE_PATTERN_LENGTH = 2048;
 
 interface InstructionArtifact {
   path: string;
@@ -68,43 +79,45 @@ async function detectLocalDriftFindings(options: DetectLocalDriftOptions): Promi
 
   const allFiles = await walk(rootDir);
   const fileSet = new Set(allFiles);
-
   const pkgJson = await loadPackageJson(rootDir);
 
   let counter = 0;
   const nextId = (suffix: string) => {
     counter += 1;
-    return `${repositoryId}-local-${suffix}-${counter}`;
+    return `finding:${repositoryId}:local-${suffix}:${counter}`;
   };
 
   for (const artifact of artifacts) {
-    const pathFindings = detectPathDrift({
-      artifact,
-      fileSet,
-      organizationId,
-      repositoryId,
-      makeId: () => nextId("stale-path")
-    });
-    findings.push(...pathFindings);
+    findings.push(
+      ...detectPathDrift({
+        artifact,
+        fileSet,
+        organizationId,
+        repositoryId,
+        makeId: () => nextId("stale-path")
+      })
+    );
 
     if (pkgJson) {
-      const commandFindings = detectCommandDrift({
-        artifact,
-        pkgJson,
-        organizationId,
-        repositoryId,
-        makeId: () => nextId("stale-command")
-      });
-      findings.push(...commandFindings);
+      findings.push(
+        ...detectCommandDrift({
+          artifact,
+          pkgJson,
+          organizationId,
+          repositoryId,
+          makeId: () => nextId("stale-command")
+        })
+      );
 
-      const stackFindings = detectStackAlignmentDrift({
-        artifact,
-        pkgJson,
-        organizationId,
-        repositoryId,
-        makeId: () => nextId("stack-mismatch")
-      });
-      findings.push(...stackFindings);
+      findings.push(
+        ...detectStackAlignmentDrift({
+          artifact,
+          pkgJson,
+          organizationId,
+          repositoryId,
+          makeId: () => nextId("stack-mismatch")
+        })
+      );
     }
   }
 
@@ -131,9 +144,9 @@ function detectPathDrift(options: {
   const candidates = new Set<string>();
 
   const pathPatterns = [
-    /(?:^|\s)(apps\/[a-zA-Z0-9_-]+)/g,
-    /(?:^|\s)(packages\/[a-zA-Z0-9_-]+)/g,
-    /(?:^|\s)(\.github\/[a-zA-Z0-9_./-]+)/g
+    /(?:^|[\s\-*>])(apps\/[a-zA-Z0-9_-]+)/gm,
+    /(?:^|[\s\-*>])(packages\/[a-zA-Z0-9_-]+)/gm,
+    /(?:^|[\s\-*>])(\.github\/[a-zA-Z0-9_./-]+)/gm
   ];
 
   for (const pattern of pathPatterns) {
@@ -143,8 +156,7 @@ function detectPathDrift(options: {
       if (!raw) {
         continue;
       }
-      const candidate = normalizePath(raw.trim());
-      candidates.add(candidate);
+      candidates.add(normalizePath(raw.trim()));
     }
   }
 
@@ -152,7 +164,7 @@ function detectPathDrift(options: {
 
   candidates.forEach((candidate) => {
     const hasExactFile = fileSet.has(candidate);
-    const hasPrefix = !hasExactFile && Array.from(fileSet).some((f) => f.startsWith(candidate + "/"));
+    const hasPrefix = !hasExactFile && Array.from(fileSet).some((file) => file.startsWith(candidate + "/"));
 
     if (!hasExactFile && !hasPrefix) {
       findings.push({
@@ -196,11 +208,7 @@ function detectCommandDrift(options: {
   for (const pattern of patterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(artifact.content)) !== null) {
-      if (match[1]) {
-        candidates.add(match[1]);
-      } else {
-        candidates.add("test");
-      }
+      candidates.add(match[1] || "test");
     }
   }
 
@@ -220,7 +228,7 @@ function detectCommandDrift(options: {
         affectedFiles: [artifact.path],
         affectedScope: artifact.path,
         suggestedRemediation:
-          "Update the referenced script name to match an existing script in package.json or adjust the instructions with the correct build/test command."
+          "Update the referenced script name to match an existing script in package.json or adjust the instructions with the correct build or test command."
       });
     }
   });
@@ -237,7 +245,6 @@ function detectStackAlignmentDrift(options: {
 }): DriftFinding[] {
   const { artifact, pkgJson, organizationId, repositoryId, makeId } = options;
   const findings: DriftFinding[] = [];
-
   const content = artifact.content;
 
   const nextClaim = extractMajorVersion(content, /Next\.js\s+(\d+)/i);
@@ -318,14 +325,14 @@ function extractMajorVersion(content: string, pattern: RegExp): number | null {
   return Number.isNaN(value) ? null : value;
 }
 
-function extractMajorFromDeps(pkgJson: PackageJsonLike, depNames: string[]): number | null {
+function extractMajorFromDeps(pkgJson: PackageJsonLike, dependencyNames: string[]): number | null {
   const allDeps = {
     ...(pkgJson.dependencies ?? {}),
     ...(pkgJson.devDependencies ?? {})
   };
 
-  for (const name of depNames) {
-    const raw = allDeps[name];
+  for (const dependencyName of dependencyNames) {
+    const raw = allDeps[dependencyName];
     if (!raw) continue;
     const major = parseSemverMajor(raw);
     if (major !== null) {
@@ -338,8 +345,8 @@ function extractMajorFromDeps(pkgJson: PackageJsonLike, depNames: string[]): num
 
 function extractMajorFromEngines(pkgJson: PackageJsonLike, engineNames: string[]): number | null {
   const engines = pkgJson.engines ?? {};
-  for (const name of engineNames) {
-    const raw = engines[name];
+  for (const engineName of engineNames) {
+    const raw = engines[engineName];
     if (!raw) continue;
     const major = parseSemverMajor(raw);
     if (major !== null) {
@@ -362,24 +369,58 @@ function parseSemverMajor(raw: string): number | null {
   return Number.isNaN(value) ? null : value;
 }
 
+export function validateBaselineConfig(config: LocalBaselineConfig): void {
+  for (const rule of config.requiredContent ?? []) {
+    if (!rule.id?.trim()) {
+      throw new Error('directiveops baseline: each requiredContent rule must have a non-empty "id"');
+    }
+    const hasContains = rule.contains != null && rule.contains !== "";
+    const hasPattern = rule.pattern != null && rule.pattern !== "";
+    if (hasContains === hasPattern) {
+      throw new Error(
+        `directiveops baseline: requiredContent rule "${rule.id}" must set exactly one of "contains" or "pattern"`
+      );
+    }
+    if (hasPattern && (rule.pattern?.length ?? 0) > MAX_BASELINE_PATTERN_LENGTH) {
+      throw new Error(
+        `directiveops baseline: requiredContent rule "${rule.id}" pattern exceeds ${MAX_BASELINE_PATTERN_LENGTH} characters`
+      );
+    }
+    if (hasPattern) {
+      try {
+        new RegExp(rule.pattern ?? "");
+      } catch (cause) {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        throw new Error(`directiveops baseline: requiredContent rule "${rule.id}" has invalid regex: ${detail}`);
+      }
+    }
+    if (rule.pathPatterns != null) {
+      const isStringArray = Array.isArray(rule.pathPatterns) && rule.pathPatterns.every((pattern) => typeof pattern === "string");
+      if (!isStringArray) {
+        throw new Error(
+          `directiveops baseline: requiredContent rule "${rule.id}" pathPatterns must be an array of strings`
+        );
+      }
+    }
+  }
+}
+
 export async function scanRepository(options: ScannerRunOptions): Promise<ScannerResult> {
   const baselineConfig = await loadBaselineConfig(options.rootDir, options.baselinePath);
+  validateBaselineConfig(baselineConfig);
   const artifacts = await discoverInstructionArtifacts(options.rootDir, baselineConfig);
   const repositoryName = options.repositoryName ?? path.basename(path.resolve(options.rootDir));
+  const organizationId = "local";
+  const repositoryId = slugify(repositoryName);
 
   const constitution = buildConstitutionGraph({
-    organizationId: "local",
-    repositoryId: slugify(repositoryName),
+    organizationId,
+    repositoryId,
     repositoryName,
-    files: artifacts.map((artifact) => ({
-      path: artifact.path,
-      content: artifact.content
-    }))
+    files: artifacts.map((artifact) => ({ path: artifact.path, content: artifact.content }))
   });
 
   const policyRules = buildScannerPolicies(baselineConfig);
-  const organizationId = "local";
-  const repositoryId = slugify(repositoryName);
   const rawFindings = evaluatePolicies({
     organizationId,
     repositoryId,
@@ -396,10 +437,26 @@ export async function scanRepository(options: ScannerRunOptions): Promise<Scanne
   });
   const findings = [...rawFindings, ...localDriftFindings];
 
+  const pkgJson = await loadPackageJson(options.rootDir);
+  const allFiles = await walk(options.rootDir);
+  const qualityContext: RepoQualityContext = {
+    hasTests: allFiles.some(
+      (file) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(file) || file.includes("__tests__/") || file.includes("test/")
+    ),
+    hasCI: allFiles.some(
+      (file) => file.startsWith(".github/workflows/") || file.startsWith(".circleci/") || file === "Jenkinsfile"
+    ),
+    hasSecurityCode: allFiles.some(
+      (file) => file.includes("auth") || file.includes("security") || file.includes("crypto")
+    ),
+    packageJson: pkgJson
+  };
+  const qualityScore = computeRepoQualityScore(constitution, qualityContext, findings);
+
   const highSeverityCount = findings.filter(
-    (f) => f.severity === "high" || f.severity === "critical"
+    (finding) => finding.severity === "high" || finding.severity === "critical"
   ).length;
-  const conflictCount = findings.filter((f) => f.type === "conflict").length;
+  const conflictCount = findings.filter((finding) => finding.type === "conflict").length;
 
   return {
     rootDir: options.rootDir,
@@ -408,6 +465,7 @@ export async function scanRepository(options: ScannerRunOptions): Promise<Scanne
     discoveredFiles: artifacts.map((artifact) => artifact.path),
     constitution,
     findings,
+    qualityScore,
     summary: {
       instructionFileCount: constitution.sourceFiles.length,
       directiveCount: constitution.layers.flatMap((layer) => layer.directives).length,
@@ -451,37 +509,58 @@ export function renderMarkdownReport(
   const poweredByFooter = options?.poweredByFooter ?? false;
 
   const lines = [
-    `# DirectiveOps OSS Scanner Report`,
-    poweredByFooter ? `*Powered by DirectiveOps scanner*` : ``,
-    ``,
+    "# DirectiveOps OSS Scanner Report",
+    poweredByFooter ? "*Powered by DirectiveOps Scanner*" : "",
+    "",
     `- ${sanitize ? "Repository: [redacted]" : `Repository: ${result.repositoryName}`}`,
     `- Scanned at: ${result.scannedAt}`,
     `- Instruction files discovered: ${result.summary.instructionFileCount}`,
     `- Directives extracted: ${result.summary.directiveCount}`,
-    `- Basic findings: ${result.summary.findingCount}`,
+    `- Findings: ${result.summary.findingCount}`,
     `- High severity findings: ${result.summary.highSeverityCount}`,
     `- Drift score: ${result.summary.driftScore}`,
     `- Conflicting instructions: ${result.summary.conflictCount}`,
-    ``,
-    `## Discovered Files`,
+    `- Quality score: ${result.qualityScore.compositeScore}/100`,
+    "",
+    "## Discovered Files",
     ...(sanitize
       ? [`- ${result.summary.instructionFileCount} file(s) discovered`]
       : result.discoveredFiles.map((file) => `- \`${file}\``)),
-    ``,
-    `## Findings`,
+    "",
+    "## Directive Coverage",
+    ...(() => {
+      const counts = new Map<string, number>();
+      for (const file of result.constitution.sourceFiles) {
+        for (const directive of file.directives) {
+          counts.set(directive.category, (counts.get(directive.category) ?? 0) + 1);
+        }
+      }
+      if (counts.size === 0) {
+        return ["No directives extracted across discovered files."];
+      }
+      return [...counts.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([category, count]) => `- ${category}: ${count}`);
+    })(),
+    "",
+    "## Findings",
     ...(result.findings.length === 0
-      ? ["No basic findings were detected in this local scan."]
+      ? ["No findings were detected in this local scan."]
       : result.findings.map((finding) =>
           sanitize
             ? `- [${finding.severity.toUpperCase()}] ${finding.summary}`
             : `- [${finding.severity.toUpperCase()}] ${finding.summary} (${finding.affectedFiles.join(", ")})`
         )),
-    ``,
-    `---`,
-    ``,
+    "",
+    "## Quality Summary",
+    `- Cross-tool parity: ${result.qualityScore.crossToolParityScore}%`,
+    `- Estimated monthly token cost: ~$${result.qualityScore.estimatedMonthlyCostImpact.toFixed(0)}`,
+    "",
+    "---",
+    "",
     poweredByFooter
-      ? `Powered by [DirectiveOps](https://directiveops.dev) — standardize and roll out AI coding instruction files across repositories.`
-      : `Generated by [DirectiveOps Scanner](https://directiveops.dev).`
+      ? "Powered by [DirectiveOps Scanner](https://directiveops.dev) - standardize and review AI coding instruction files across repositories."
+      : "Generated by [DirectiveOps Scanner](https://directiveops.dev)."
   ];
 
   return lines.join("\n");
@@ -522,6 +601,28 @@ function buildScannerPolicies(config: LocalBaselineConfig): PolicyRule[] {
     });
   });
 
+  (config.requiredContent ?? []).forEach((entry, index) => {
+    rules.push({
+      id: `local-required-content-${index + 1}`,
+      organizationId: "local",
+      code: `LOCAL-CONTENT-${index + 1}`,
+      name: `Require instruction content: ${entry.label ?? entry.id}`,
+      description: `The local baseline requires instruction text matching rule ${entry.id}.`,
+      type: "required-content",
+      severity: "medium",
+      enabled: true,
+      config: {
+        contentRuleId: entry.id,
+        label: entry.label,
+        ...(entry.contains ? { contains: entry.contains } : {}),
+        ...(entry.pattern ? { pattern: entry.pattern } : {}),
+        ...(Array.isArray(entry.pathPatterns) && entry.pathPatterns.length > 0
+          ? { pathPatterns: entry.pathPatterns }
+          : {})
+      }
+    });
+  });
+
   return rules;
 }
 
@@ -549,43 +650,7 @@ async function walk(rootDir: string, currentDir = rootDir, prefix = ""): Promise
 }
 
 function isSupportedInstructionPath(relativePath: string, config: LocalBaselineConfig): boolean {
-  if (
-    relativePath === "AGENTS.md" ||
-    relativePath === "CLAUDE.md" ||
-    relativePath === "GEMINI.md" ||
-    relativePath === ".github/copilot-instructions.md"
-  ) {
-    return true;
-  }
-
-  if (relativePath.startsWith(".github/instructions/") && relativePath.endsWith(".instructions.md")) {
-    return true;
-  }
-
-  if (
-    relativePath === ".cursor/rules" ||
-    relativePath === ".cursor/rules.md" ||
-    relativePath === ".github/copilot.yaml" ||
-    relativePath === "copilot.yaml" ||
-    relativePath === "nemoclaw.yaml" ||
-    relativePath === "nemoclaw.yml" ||
-    relativePath === "openshell-policy.yaml" ||
-    relativePath === "inference-profiles.yaml" ||
-    relativePath === "inference-profiles.yml" ||
-    relativePath === "SOUL.md" ||
-    relativePath === "TOOLS.md" ||
-    relativePath === "MEMORY.md" ||
-    relativePath === "AI.md" ||
-    relativePath === "AI-RULES.md"
-  ) {
-    return true;
-  }
-
-  if (relativePath.startsWith(".windsurf/") && relativePath.endsWith(".md")) {
-    return true;
-  }
-
-  if (relativePath.startsWith("policies/") && relativePath.endsWith(".yaml")) {
+  if (matchInstructionFile(relativePath)) {
     return true;
   }
 
@@ -599,4 +664,3 @@ function normalizePath(value: string): string {
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
-
